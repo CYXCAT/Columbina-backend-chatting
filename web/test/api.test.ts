@@ -1,4 +1,3 @@
-import { decodeJwt } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDbForTests } from "@/lib/db";
 
@@ -11,6 +10,20 @@ vi.mock("@/lib/identity", () => ({
     return { sub: "g-123", email: "a@example.com", name: "Alice" };
   }),
   verifyAppleIdentityToken: vi.fn(),
+}));
+
+vi.mock("@/lib/agora", () => ({
+  startAgoraSession: vi.fn(async (user: { id: string; language: string }) => ({
+    appId: "test-app-id",
+    channel: `companion-${user.id}`,
+    uid: 123,
+    agentUid: 456,
+    agentId: "agent-1",
+    rtcToken: "rtc-token",
+    rtmToken: "rtm-token",
+    expiresAt: 123456789,
+    sessionToken: `session-${user.id}-${user.language}`,
+  })),
 }));
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -87,28 +100,24 @@ describe("me", () => {
   });
 });
 
-describe("livekit token", () => {
-  it("grants text-only access and dispatches the companion agent with the user's language", async () => {
+describe("Agora session", () => {
+  it("starts a session for the authenticated user with their language", async () => {
     const s = await devLogin();
     const { PATCH } = await import("@/app/api/me/route");
     await PATCH(new Request("http://test/api/me", { method: "PATCH", headers: bearer(s.accessToken), body: JSON.stringify({ language: "zh" }) }));
 
-    const { POST } = await import("@/app/api/livekit/token/route");
+    const { POST } = await import("@/app/api/agora/session/route");
     const res = await POST(post({}, bearer(s.accessToken)));
     expect(res.status).toBe(200);
-    const { serverUrl, token, roomName } = await res.json();
-    expect(serverUrl).toBe("wss://test.livekit.cloud");
-
-    const claims = decodeJwt(token) as Record<string, any>;
-    expect(claims.sub).toBe(s.user.id);
-    expect(claims.video).toMatchObject({ roomJoin: true, room: roomName, canPublish: false, canSubscribe: true, canPublishData: true });
-    const dispatch = claims.roomConfig.agents[0];
-    expect(dispatch.agentName).toBe("companion");
-    expect(JSON.parse(dispatch.metadata)).toEqual({ userId: s.user.id, language: "zh" });
+    const body = await res.json();
+    expect(body.channel).toBe(`companion-${s.user.id}`);
+    expect(body.sessionToken).toBe(`session-${s.user.id}-zh`);
+    expect(body.rtcToken).toBeTruthy();
+    expect(body.rtmToken).toBeTruthy();
   });
 
   it("rejects anonymous callers", async () => {
-    const { POST } = await import("@/app/api/livekit/token/route");
+    const { POST } = await import("@/app/api/agora/session/route");
     expect((await POST(post({}))).status).toBe(401);
   });
 });

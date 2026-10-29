@@ -1,5 +1,7 @@
 import path from "node:path";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { drizzle as drizzleNodePostgres } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import * as schema from "@/db/schema";
 
 export type DB = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -8,8 +10,9 @@ const migrationsFolder = path.join(process.cwd(), "drizzle");
 
 let dbPromise: Promise<DB> | undefined;
 
-// Postgres via Neon when DATABASE_URL is set (Vercel), otherwise an embedded PGlite database for
-// zero-setup local development (persisted to .pglite/, or in memory when PGLITE_DIR=memory).
+// PostgreSQL when DATABASE_URL is set (including Supabase's transaction pooler), otherwise an
+// embedded PGlite database for zero-setup local development (persisted to .pglite/, or in memory
+// when PGLITE_DIR=memory).
 export function getDb(): Promise<DB> {
   dbPromise ??= open();
   return dbPromise;
@@ -18,9 +21,15 @@ export function getDb(): Promise<DB> {
 async function open(): Promise<DB> {
   const url = process.env.DATABASE_URL;
   if (url) {
-    const { neon } = await import("@neondatabase/serverless");
-    const { drizzle } = await import("drizzle-orm/neon-http");
-    return drizzle(neon(url), { schema }) as unknown as DB;
+    const pool = new Pool({
+      connectionString: url,
+      // Serverless instances should keep their application-side pool deliberately small. Supabase's
+      // transaction pooler handles concurrency across instances.
+      max: 1,
+      connectionTimeoutMillis: 10_000,
+      idleTimeoutMillis: 30_000,
+    });
+    return drizzleNodePostgres(pool, { schema }) as unknown as DB;
   }
 
   const { PGlite } = await import("@electric-sql/pglite");

@@ -13,18 +13,20 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.12",
-    "@neondatabase/serverless": "^1.2.0",
+    "agora-agents": "^2.12.0",
+    "agora-token": "^2.0.7",
     "drizzle-orm": "^0.45.4",
     "google-auth-library": "^11.3.1",
     "jose": "^6.2.13",
-    "livekit-server-sdk": "^2.19.2",
     "next": "^16.4.3",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "drizzle-kit": "^0.31.11",
     "typescript": "^7.0.2",
