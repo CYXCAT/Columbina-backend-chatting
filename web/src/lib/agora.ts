@@ -16,6 +16,7 @@ import type { User } from "@/db/schema";
 import { HttpError, requireEnv } from "./http";
 
 const SESSION_TTL_SECONDS = 60 * 60;
+const AGENT_IDLE_TIMEOUT_SECONDS = 30;
 const AGENT_UID = 987_654_321;
 const ISSUER = "companion-agora";
 const AUDIENCE = "companion-app";
@@ -118,7 +119,8 @@ export async function startAgoraSession(user: User) {
     agentUid: String(AGENT_UID),
     remoteUids: [String(uid)],
     name: `companion-${user.id}-${Date.now()}`,
-    idleTimeout: SESSION_TTL_SECONDS,
+    // Seconds the agent lingers after the app leaves the channel; ConvoAI bills agent time until it stops.
+    idleTimeout: AGENT_IDLE_TIMEOUT_SECONDS,
     expiresIn: ExpiresIn.hours(1),
   });
   const agentId = await session.start();
