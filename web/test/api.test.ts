@@ -12,18 +12,24 @@ vi.mock("@/lib/identity", () => ({
   verifyAppleIdentityToken: vi.fn(),
 }));
 
-vi.mock("@/lib/agora", () => ({
-  startAgoraSession: vi.fn(async (user: { id: string; language: string }) => ({
-    appId: "test-app-id",
-    channel: `companion-${user.id}`,
-    uid: 123,
-    agentUid: 456,
-    agentId: "agent-1",
-    rtcToken: "rtc-token",
-    rtmToken: "rtm-token",
-    expiresAt: 123456789,
-    sessionToken: `session-${user.id}-${user.language}`,
+vi.mock("ai", () => ({
+  streamText: vi.fn(() => ({
+    textStream: (async function* () {
+      yield "Hi there, ";
+      yield "nice to see you. How was";
+      yield " your day?";
+    })(),
   })),
+}));
+
+vi.mock("@/lib/tts", () => ({
+  getTts: () => ({
+    name: "fake",
+    sampleRate: 16000,
+    async *synthesize(text: string) {
+      yield new Uint8Array(text.length * 2);
+    },
+  }),
 }));
 
 const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -100,25 +106,63 @@ describe("me", () => {
   });
 });
 
-describe("Agora session", () => {
-  it("starts a session for the authenticated user with their language", async () => {
-    const s = await devLogin();
-    const { PATCH } = await import("@/app/api/me/route");
-    await PATCH(new Request("http://test/api/me", { method: "PATCH", headers: bearer(s.accessToken), body: JSON.stringify({ language: "zh" }) }));
+describe("chat", () => {
+  const events = async (res: Response) =>
+    (await res.text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
 
-    const { POST } = await import("@/app/api/agora/session/route");
-    const res = await POST(post({}, bearer(s.accessToken)));
+  it("streams sentence text with audio and stores both turns", async () => {
+    const s = await devLogin();
+    const { POST } = await import("@/app/api/chat/route");
+    const res = await POST(post({ text: "hello" }, bearer(s.accessToken)));
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.channel).toBe(`companion-${s.user.id}`);
-    expect(body.sessionToken).toBe(`session-${s.user.id}-zh`);
-    expect(body.rtcToken).toBeTruthy();
-    expect(body.rtmToken).toBeTruthy();
+    const ev = await events(res);
+
+    expect(ev[0]).toEqual({ t: "start", sampleRate: 16000 });
+    expect(ev.filter((e) => e.t === "text").map((e) => e.text)).toEqual([
+      "Hi there, nice to see you.",
+      "Hi there, nice to see you. How was your day?",
+    ]);
+    expect(ev.filter((e) => e.t === "audio")).toHaveLength(2);
+    expect(ev.at(-1)).toEqual({ t: "done", text: "Hi there, nice to see you. How was your day?" });
+
+    const { getDb } = await import("@/lib/db");
+    const { messages } = await import("@/db/schema");
+    const rows = await (await getDb()).select({ role: messages.role, text: messages.text }).from(messages);
+    expect(rows).toEqual([
+      { role: "user", text: "hello" },
+      { role: "assistant", text: "Hi there, nice to see you. How was your day?" },
+    ]);
   });
 
-  it("rejects anonymous callers", async () => {
-    const { POST } = await import("@/app/api/agora/session/route");
-    expect((await POST(post({}))).status).toBe(401);
+  it("speaks the greeting without storing it", async () => {
+    const s = await devLogin();
+    const { POST } = await import("@/app/api/chat/route");
+    const ev = await events(await POST(post({ greeting: true }, bearer(s.accessToken))));
+    expect(ev.at(-1)).toEqual({ t: "done", text: "Hi, I'm here with you. What's on your mind?" });
+
+    const { getDb } = await import("@/lib/db");
+    const { messages } = await import("@/db/schema");
+    expect(await (await getDb()).select().from(messages)).toEqual([]);
+  });
+
+  it("rejects anonymous callers and empty messages", async () => {
+    const s = await devLogin();
+    const { POST } = await import("@/app/api/chat/route");
+    expect((await POST(post({ text: "hi" }))).status).toBe(401);
+    expect((await POST(post({ text: "  " }, bearer(s.accessToken)))).status).toBe(400);
+  });
+});
+
+describe("sentence splitter", () => {
+  it("splits on sentence ends, keeps decimals and merges short fragments", async () => {
+    const { SentenceSplitter } = await import("@/lib/sentences");
+    const sp = new SentenceSplitter();
+    expect(sp.push("Pi is 3.14 roughly. Ok! ")).toEqual(["Pi is 3.14 roughly."]);
+    expect(sp.push("你好呀。今天天气不错！还")).toEqual(["Ok! 你好呀。", "今天天气不错！"]);
+    expect(sp.flush()).toEqual(["还"]);
   });
 });
 
