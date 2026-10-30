@@ -1,0 +1,10 @@
+# Only web/ is built (Project Settings → Root Directory = web)
+agent/
+supabase/
+docs/
+scripts/
+**/.env*
+!**/.env.example
+**/node_modules
+**/.next
+**/.pglite

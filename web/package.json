@@ -12,6 +12,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@ai-sdk/deepseek": "^3.0.75",
     "@electric-sql/pglite": "^0.5.12",
     "ai": "^7.0.156",
     "drizzle-orm": "^0.45.4",

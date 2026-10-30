@@ -5,6 +5,7 @@ import { type Language, messages } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { handler, parseBody } from "@/lib/http";
+import { getLlm } from "@/lib/llm";
 import { personaFor } from "@/lib/persona";
 import { SentenceSplitter } from "@/lib/sentences";
 import { getTts, type TtsProvider } from "@/lib/tts";
@@ -72,6 +73,7 @@ export const POST = handler(async (req: Request) => {
       const spoken = speak(sentences, tts, user.language, signal, send);
       let reply = "";
       let failed = false;
+      let llmError: unknown;
 
       if ("greeting" in body) {
         reply = persona.greeting;
@@ -79,10 +81,14 @@ export const POST = handler(async (req: Request) => {
       } else {
         try {
           const result = streamText({
-            model: process.env.LLM_MODEL?.trim() || "openai/gpt-4.1-mini",
+            ...getLlm(user.id),
             instructions: persona.instructions,
             messages: [...history, { role: "user", content: body.text }],
             abortSignal: signal,
+            // textStream ends quietly on a model error instead of throwing.
+            onError: ({ error }) => {
+              llmError = error;
+            },
           });
           const splitter = new SentenceSplitter();
           for await (const delta of result.textStream) {
@@ -90,6 +96,7 @@ export const POST = handler(async (req: Request) => {
             for (const s of splitter.push(delta)) sentences.push(s);
           }
           for (const s of splitter.flush()) sentences.push(s);
+          if (llmError) throw llmError;
         } catch (e) {
           if (!signal.aborted) console.error(e);
           failed = true;

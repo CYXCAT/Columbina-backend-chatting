@@ -22,6 +22,8 @@ vi.mock("ai", () => ({
   })),
 }));
 
+vi.mock("@/lib/llm", () => ({ getLlm: () => ({ model: "test-model" }) }));
+
 vi.mock("@/lib/tts", () => ({
   getTts: () => ({
     name: "fake",

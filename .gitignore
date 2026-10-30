@@ -7,3 +7,4 @@ __pycache__/
 .pglite/
 *.tsbuildinfo
 supabase/.temp/
+.vercel
