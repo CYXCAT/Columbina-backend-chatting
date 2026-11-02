@@ -95,6 +95,16 @@ export async function rotateRefreshToken(token: string): Promise<AuthResponse> {
   return issueSession(user);
 }
 
+// Sign-out: deletes just this device's token rather than marking it revoked, so presenting it again
+// is an unknown token, not a replay that would kill the user's other sessions. Idempotent.
+// An already-rotated token is left in place to keep reuse detection for its family.
+export async function revokeRefreshToken(token: string): Promise<void> {
+  const db = await getDb();
+  await db
+    .delete(refreshTokens)
+    .where(and(eq(refreshTokens.tokenHash, sha256(token)), isNull(refreshTokens.revokedAt)));
+}
+
 export async function requireUser(req: Request): Promise<User> {
   const header = req.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;

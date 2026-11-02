@@ -68,6 +68,19 @@ describe("auth", () => {
     expect((await POST(post({ name: "x" }))).status).toBe(404);
   });
 
+  it("dev login in production needs the matching key", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const key = "k".repeat(40);
+    vi.stubEnv("DEV_LOGIN_KEY", key);
+    const { POST } = await import("@/app/api/auth/dev/route");
+    expect((await POST(post({ name: "x" }))).status).toBe(404);
+    expect((await POST(post({ name: "x" }, { "x-dev-login-key": "wrong" }))).status).toBe(404);
+    expect((await POST(post({ name: "x" }, { "x-dev-login-key": key }))).status).toBe(200);
+
+    vi.stubEnv("DEV_LOGIN_KEY", "short");
+    expect((await POST(post({ name: "x" }, { "x-dev-login-key": "short" }))).status).toBe(404);
+  });
+
   it("google sign-in creates the user once and issues a session", async () => {
     const { POST } = await import("@/app/api/auth/google/route");
     const a = await (await POST(post({ idToken: "good-google" }))).json();
@@ -89,6 +102,22 @@ describe("auth", () => {
     // replaying the old token is rejected and also kills the newer one
     expect((await POST(post({ refreshToken: s0.refreshToken }))).status).toBe(401);
     expect((await POST(post({ refreshToken: s1.refreshToken }))).status).toBe(401);
+  });
+
+  it("logout revokes only that device's refresh token and is idempotent", async () => {
+    const { POST: logout } = await import("@/app/api/auth/logout/route");
+    const { POST: refresh } = await import("@/app/api/auth/refresh/route");
+    const phone = await devLogin();
+    const tablet = await devLogin();
+
+    expect((await logout(post({ refreshToken: phone.refreshToken }))).status).toBe(204);
+    expect((await refresh(post({ refreshToken: phone.refreshToken }))).status).toBe(401);
+    // the user's other session survives
+    expect((await refresh(post({ refreshToken: tablet.refreshToken }))).status).toBe(200);
+
+    expect((await logout(post({ refreshToken: phone.refreshToken }))).status).toBe(204);
+    expect((await logout(post({ refreshToken: "unknown" }))).status).toBe(204);
+    expect((await logout(post({}))).status).toBe(400);
   });
 });
 
